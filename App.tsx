@@ -7,9 +7,10 @@ import GallerySection from './components/GallerySection';
 import SocialSection from './components/SocialSection';
 import Footer from './components/Footer';
 import PreorderSection from './components/PreorderSection';
+import OrdersSection from './components/OrdersSection';
 import { getMe, refreshSession, UserResponse } from './services/auth';
 
-type TabType = 'home' | 'preorder';
+type TabType = 'home' | 'preorder' | 'orders';
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
@@ -31,6 +32,11 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     getMe().then(setUser);
   }, []);
+
+  // If user logs out while on an auth-gated tab, fall back to Home.
+  useEffect(() => {
+    if (!user && activeTab === 'orders') setActiveTab('home');
+  }, [user, activeTab]);
 
   // Refresh the session cookie every 20 minutes while the tab is open,
   // and immediately when the tab becomes visible again (user switched back).
@@ -125,6 +131,10 @@ const AppContent: React.FC = () => {
       <main className="flex-grow">
         {activeTab === 'preorder' && (
           <PreorderSection user={user} onUserChange={setUser} />
+        )}
+
+        {activeTab === 'orders' && user && (
+          <OrdersSection user={user} />
         )}
 
         {activeTab === 'home' && <>

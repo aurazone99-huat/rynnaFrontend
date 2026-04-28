@@ -2,7 +2,7 @@ import React from 'react';
 import LoginButton from './LoginButton';
 import { UserResponse } from '../services/auth';
 
-type TabType = 'home' | 'preorder';
+type TabType = 'home' | 'preorder' | 'orders';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -14,9 +14,10 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, user, onUserChange }) => {
   const logoPath = 'https://res.cloudinary.com/dityornjc/image/upload/v1767108617/icon_jkc3ac.jpg';
 
-  const tabs: { id: TabType; label: string }[] = [
-    { id: 'home', label: 'Home' },
+  const tabs: { id: TabType; label: string; authRequired?: boolean }[] = [
+    { id: 'home',     label: 'Home' },
     { id: 'preorder', label: 'Preorder' },
+    { id: 'orders',   label: 'Orders', authRequired: true },
   ];
 
   return (
@@ -37,19 +38,21 @@ const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, user, onUserCha
           </div>
 
           <nav className="flex items-center gap-2">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => onTabChange(tab.id)}
-                className={`clay-button px-6 py-2.5 text-xs font-black uppercase tracking-widest outline-none transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-purple-100 text-purple-600 shadow-[inset_4px_4px_8px_rgba(0,0,0,0.05)]'
-                    : 'bg-white text-purple-400'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            {tabs
+              .filter(tab => !tab.authRequired || user)
+              .map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => onTabChange(tab.id)}
+                  className={`clay-button px-6 py-2.5 text-xs font-black uppercase tracking-widest outline-none transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-purple-100 text-purple-600 shadow-[inset_4px_4px_8px_rgba(0,0,0,0.05)]'
+                      : 'bg-white text-purple-400'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
           </nav>
         </div>
 

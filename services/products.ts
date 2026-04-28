@@ -169,3 +169,67 @@ export async function checkout(payload: CheckoutRequest): Promise<OrderResponse>
   }
   return body;
 }
+
+// ------------------------------------------------------------------ //
+// Local-first cart helpers                                            //
+// ------------------------------------------------------------------ //
+
+/**
+ * Delete every item from the backend cart (best-effort cleanup).
+ * Called when the local cart becomes empty, so the backend stays in sync.
+ */
+export async function clearBackendCart(): Promise<void> {
+  try {
+    const cart = await getCart();
+    if (cart.items.length === 0) return;
+    await Promise.all(cart.items.map(i => removeCartItem(i.cart_item_id)));
+  } catch {
+    // Silently ignore — backend cart cleanup is best-effort
+  }
+}
+
+/**
+ * Sync the IndexedDB cart to the backend right before checkout:
+ *   1. Wipe any stale backend cart items.
+ *   2. Re-add every local item with its current quantity.
+ * Returns the final CartSummary from the backend.
+ * Throws (with `.status`) on 409 if any item is out of stock.
+ */
+export async function syncCartToBackend(localCart: CartSummary): Promise<CartSummary> {
+  await clearBackendCart();
+  let last: CartSummary | null = null;
+  for (const item of localCart.items) {
+    // addToCart throws 409 with the item name if that product is sold out
+    last = await addToCart(item.product_id, item.quantity);
+  }
+  if (!last) throw new Error('cart_empty');
+  return last;
+}
+
+/**
+ * Upload a payment-proof image for a placed order.
+ * Sends multipart/form-data with field `proof_image`.
+ * Throws with `.status` on 403 / 404 / 409.
+ */
+export async function uploadPaymentProof(
+  orderId: string,
+  file:    File,
+): Promise<OrderResponse> {
+  const form = new FormData();
+  form.append('proof_image', file);
+
+  const res = await fetch(`${API_URL}/orders/${orderId}/payment-proof`, {
+    method:      'POST',
+    credentials: 'include',
+    body:        form,
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(body.detail ?? 'upload_failed'),
+      { status: res.status },
+    );
+  }
+  return body;
+}

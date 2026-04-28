@@ -1,22 +1,26 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  addToCart,
   CartSummary,
-  checkout,
+  clearBackendCart,
   fetchProducts,
   formatPrice,
-  getCart,
   isComponentAvailable,
   isProductAvailable,
-  OrderResponse,
   Product,
-  removeCartItem,
   stockLabel,
-  updateCartItem,
 } from '../services/products';
+import {
+  buildOptimisticCart,
+  dbClearCart,
+  dbLoadCart,
+  dbSaveCart,
+  removeLocalCartItem,
+  updateLocalCartItem,
+} from '../services/cartDb';
 import { UserResponse } from '../services/auth';
 import AuthModal from './AuthModal';
+import CheckoutPage from './CheckoutPage';
 
 // ------------------------------------------------------------------ //
 // Toast                                                                //
@@ -66,58 +70,21 @@ interface CartDrawerProps {
   cart: CartSummary;
   onClose: () => void;
   onUpdate: (updated: CartSummary) => void;
-  onToast: (message: string, type: Toast['type']) => void;
-  onOrderComplete: (order: OrderResponse) => void;
+  onProceedToCheckout: () => void;
 }
 
-const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onToast, onOrderComplete }) => {
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [checkingOut, setCheckingOut] = useState(false);
+const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onProceedToCheckout }) => {
   const isEmpty = cart.items.length === 0;
 
-  const handleQty = async (cartItemId: number, qty: number) => {
-    setBusyId(cartItemId);
-    try {
-      const updated = qty < 1
-        ? await removeCartItem(cartItemId)
-        : await updateCartItem(cartItemId, qty);
-      onUpdate(updated);
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleCheckout = async () => {
-    setCheckingOut(true);
-    try {
-      const order = await checkout({ payment_method: 'bank_transfer', payment_type: 'manual' });
-      onOrderComplete(order);
-      onClose();
-      onToast(`Order placed! Order ID: ${order.id.slice(0, 8)}…`, 'success');
-    } catch (err: unknown) {
-      const e = err as Error & { status?: number };
-      if (e.status === 409) {
-        // Race condition — refresh the cart so auto-removed items are cleared
-        try {
-          const refreshed = await getCart();
-          onUpdate(refreshed);
-          if (refreshed.removed_items.length > 0) {
-            onToast(
-              `Removed from cart (out of stock): ${refreshed.removed_items.join(', ')}`,
-              'warning',
-            );
-          } else {
-            onToast(e.message || 'Some items are out of stock.', 'error');
-          }
-        } catch {
-          onToast(e.message || 'Some items are out of stock.', 'error');
-        }
-      } else {
-        onToast(e.message || 'Checkout failed. Please try again.', 'error');
-      }
-    } finally {
-      setCheckingOut(false);
-    }
+  // All quantity changes are purely local — no backend call until checkout.
+  const handleQty = (productId: string, qty: number) => {
+    const updated =
+      qty < 1
+        ? removeLocalCartItem(cart, productId)
+        : updateLocalCartItem(cart, productId, qty);
+    onUpdate(updated);
+    // If the cart just became empty, clean up any stale backend cart.
+    if (updated.item_count === 0) clearBackendCart().catch(() => {});
   };
 
   return createPortal(
@@ -162,28 +129,26 @@ const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onToas
             </div>
           ) : (
             cart.items.map(item => (
-              <div key={item.cart_item_id} className="clay-puffy-sm p-4 flex gap-3">
+              <div key={item.product_id} className="clay-puffy-sm p-4 flex gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-black text-zinc-800 truncate">{item.product_name}</p>
                   <p className="text-xs text-zinc-400 font-medium mt-0.5">{formatPrice(item.unit_price)} each</p>
                 </div>
 
-                {/* Quantity controls */}
+                {/* Quantity controls — instant local mutations, no backend call */}
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    disabled={busyId === item.cart_item_id}
-                    onClick={() => handleQty(item.cart_item_id, item.quantity - 1)}
-                    className="clay-button w-7 h-7 flex items-center justify-center text-purple-500 font-black outline-none disabled:opacity-40 text-lg leading-none"
+                    onClick={() => handleQty(item.product_id, item.quantity - 1)}
+                    className="clay-button w-7 h-7 flex items-center justify-center text-purple-500 font-black outline-none text-lg leading-none"
                   >
                     −
                   </button>
                   <span className="w-5 text-center text-sm font-black text-zinc-700">
-                    {busyId === item.cart_item_id ? '…' : item.quantity}
+                    {item.quantity}
                   </span>
                   <button
-                    disabled={busyId === item.cart_item_id}
-                    onClick={() => handleQty(item.cart_item_id, item.quantity + 1)}
-                    className="clay-button w-7 h-7 flex items-center justify-center text-purple-500 font-black outline-none disabled:opacity-40 text-lg leading-none"
+                    onClick={() => handleQty(item.product_id, item.quantity + 1)}
+                    className="clay-button w-7 h-7 flex items-center justify-center text-purple-500 font-black outline-none text-lg leading-none"
                   >
                     +
                   </button>
@@ -206,15 +171,15 @@ const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onToas
             </div>
           )}
           <button
-            disabled={isEmpty || checkingOut}
-            onClick={handleCheckout}
+            disabled={isEmpty}
+            onClick={() => { onClose(); onProceedToCheckout(); }}
             className={`clay-button w-full py-3.5 text-xs font-black uppercase tracking-widest outline-none transition-all ${
               isEmpty
                 ? 'text-zinc-300 cursor-not-allowed'
                 : 'text-white bg-purple-500 hover:bg-purple-600'
             } disabled:opacity-60`}
           >
-            {checkingOut ? 'Placing order…' : isEmpty ? 'Your cart is empty' : 'Proceed to Checkout'}
+            {isEmpty ? 'Your cart is empty' : 'Proceed to Checkout'}
           </button>
         </div>
       </div>
@@ -229,16 +194,12 @@ const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onToas
 
 interface BundleModalProps {
   product: Product;
-  addingId: string | null;
-  cartError: { productId: string; message: string } | null;
   onAddToCart: (productId: string) => void;
   onClose: () => void;
 }
 
-const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError, onAddToCart, onClose }) => {
+const BundleModal: React.FC<BundleModalProps> = ({ product, onAddToCart, onClose }) => {
   const available = isProductAvailable(product);
-  const busy = addingId === product.id;
-  const errorMsg = cartError?.productId === product.id ? cartError.message : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -326,10 +287,26 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
                     return (
                       <li
                         key={c.id}
-                        className={`clay-inset px-4 py-3 flex items-center gap-3 ${!cAvail ? 'opacity-60' : ''}`}
+                        className={`clay-inset px-3 py-3 flex items-center gap-3 ${!cAvail ? 'opacity-60' : ''}`}
                       >
-                        {/* Availability dot */}
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${cAvail ? 'bg-emerald-400' : 'bg-zinc-300'}`} />
+                        {/* Item image / icon */}
+                        <div className="relative shrink-0">
+                          <div className="w-12 h-12 rounded-2xl overflow-hidden bg-gradient-to-br from-purple-50 to-pink-50 flex items-center justify-center">
+                            {c.image_url ? (
+                              <img
+                                src={c.image_url}
+                                alt={c.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-purple-200">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                              </svg>
+                            )}
+                          </div>
+                          {/* Availability dot pinned to bottom-right of the image */}
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${cAvail ? 'bg-emerald-400' : 'bg-zinc-300'}`} />
+                        </div>
 
                         {/* Name + description */}
                         <div className="flex-1 min-w-0">
@@ -341,18 +318,24 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
                           )}
                         </div>
 
-                        {/* Right side: stock badge or price */}
-                        <div className="shrink-0 text-right">
+                        {/* Right side: Add button (available) or Sold Out badge */}
+                        <div className="shrink-0 flex flex-col items-end gap-1">
+                          {cAvail && cStock && (
+                            <span className="text-[10px] font-black uppercase tracking-wider text-orange-500 bg-orange-50 px-2 py-1 rounded-full">
+                              {cStock}
+                            </span>
+                          )}
                           {!cAvail ? (
                             <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 bg-zinc-100 px-2 py-1 rounded-full">
                               Sold Out
                             </span>
-                          ) : cStock ? (
-                            <span className="text-[10px] font-black uppercase tracking-wider text-orange-500 bg-orange-50 px-2 py-1 rounded-full">
-                              {cStock}
-                            </span>
                           ) : (
-                            <span className="text-xs font-black text-zinc-400">{formatPrice(c.price)}</span>
+                            <button
+                              onClick={() => onAddToCart(c.id)}
+                              className="clay-button px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-purple-600 outline-none hover:bg-purple-50"
+                            >
+                              Add
+                            </button>
                           )}
                         </div>
                       </li>
@@ -360,11 +343,6 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
                   })}
                 </ul>
               </div>
-            )}
-
-            {/* Error */}
-            {errorMsg && (
-              <p className="mt-4 text-xs text-red-500 font-semibold leading-snug">{errorMsg}</p>
             )}
 
             {/* Footer action */}
@@ -376,7 +354,7 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
                 Close
               </button>
               <button
-                disabled={!available || busy}
+                disabled={!available}
                 onClick={() => onAddToCart(product.id)}
                 className={`clay-button flex-1 py-3 text-xs font-black uppercase tracking-widest outline-none transition-all ${
                   !available
@@ -384,7 +362,7 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
                     : 'text-white bg-purple-500'
                 } disabled:opacity-60`}
               >
-                {busy ? 'Adding…' : !available ? 'Sold Out' : 'Add to Cart'}
+                {!available ? 'Sold Out' : 'Add Bundle'}
               </button>
             </div>
           </div>
@@ -401,17 +379,13 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, addingId, cartError,
 
 interface ProductCardProps {
   product: Product;
-  addingId: string | null;
-  cartError: { productId: string; message: string } | null;
   onAddToCart: (productId: string) => void;
   onOpenBundle: (product: Product) => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product, addingId, cartError, onAddToCart, onOpenBundle }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart, onOpenBundle }) => {
   const available = isProductAvailable(product);
   const stock = stockLabel(product.stock_quantity);
-  const busy = addingId === product.id;
-  const errorMsg = cartError?.productId === product.id ? cartError.message : null;
 
   return (
     <div
@@ -473,11 +447,6 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, addingId, cartError,
           )}
         </div>
 
-        {/* 409 error */}
-        {errorMsg && (
-          <p className="text-[10px] text-red-500 font-semibold leading-snug">{errorMsg}</p>
-        )}
-
         <div className="flex items-center justify-between gap-2 mt-auto">
           <span className="text-lg font-black text-purple-700">{formatPrice(product.price)}</span>
           {product.is_bundle ? (
@@ -490,13 +459,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, addingId, cartError,
             </span>
           ) : (
             <button
-              disabled={!available || busy}
+              disabled={!available}
               onClick={e => { e.stopPropagation(); onAddToCart(product.id); }}
               className={`clay-button px-4 py-2 text-[10px] font-black uppercase tracking-widest outline-none transition-all ${
                 !available ? 'text-zinc-300 cursor-not-allowed' : 'text-purple-600 hover:bg-purple-50'
               } disabled:opacity-60`}
             >
-              {busy ? '…' : !available ? 'Sold Out' : 'Add to Cart'}
+              {!available ? 'Sold Out' : 'Add to Cart'}
             </button>
           )}
         </div>
@@ -515,13 +484,21 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
   const [cartOpen, setCartOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
-  const [addingId, setAddingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
-  const [cartError, setCartError] = useState<{ productId: string; message: string } | null>(null);
   const [selectedBundle, setSelectedBundle] = useState<Product | null>(null);
+  const [view, setView] = useState<'products' | 'checkout'>('products');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Mirrors `cart` state as a ref so async callbacks can read the latest value
+  // without listing `cart` in their dependency arrays.
+  const cartRef = useRef<CartSummary | null>(null);
+  useEffect(() => { cartRef.current = cart; }, [cart]);
+
+  // Mirrors `products` for the same reason.
+  const productsRef = useRef<Product[]>([]);
+  useEffect(() => { productsRef.current = products; }, [products]);
 
   const showToast = useCallback((message: string, type: Toast['type']) => {
     const id = ++_toastId;
@@ -536,22 +513,6 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
     if (timer) { clearTimeout(timer); toastTimers.current.delete(id); }
   };
 
-  // Loads cart and fires a warning toast if the backend auto-removed any items.
-  const loadCart = useCallback(async () => {
-    try {
-      const updated = await getCart();
-      setCart(updated);
-      if (updated.removed_items.length > 0) {
-        showToast(
-          `Removed from your cart (out of stock): ${updated.removed_items.join(', ')}`,
-          'warning',
-        );
-      }
-    } catch {
-      setCart(null);
-    }
-  }, [showToast]);
-
   // Load products (public — no auth needed)
   useEffect(() => {
     fetchProducts()
@@ -560,57 +521,113 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
       .finally(() => setLoadingProducts(false));
   }, []);
 
-  // Load cart whenever user changes
+  // Load cart from IndexedDB whenever the user changes.
+  // The backend is never fetched here — it is only involved at checkout.
   useEffect(() => {
     if (user) {
-      loadCart();
+      dbLoadCart(user.id)
+        .then(cached => { if (cached) setCart(cached); })
+        .catch(() => {});
     } else {
       setCart(null);
     }
-  }, [user, loadCart]);
+  }, [user]);
 
-  const handleAddToCart = useCallback(async (productId: string) => {
+  // Add a product to the local IndexedDB cart — no backend call.
+  // The backend is only updated when the user presses "Proceed to Checkout".
+  const handleAddToCart = useCallback((productId: string) => {
     if (!user) {
       setPendingProductId(productId);
       setShowLogin(true);
       return;
     }
-    setAddingId(productId);
-    setCartError(null);
-    try {
-      const updated = await addToCart(productId);
-      setCart(updated);
-      setCartOpen(true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg !== 'add_to_cart_failed' && msg !== 'not_authenticated') {
-        setCartError({ productId, message: msg });
-      }
-    } finally {
-      setAddingId(null);
-    }
+
+    const product = productsRef.current.find(p => p.id === productId);
+    if (!product) return;
+
+    const updated = buildOptimisticCart(
+      cartRef.current,
+      { id: product.id, name: product.name, price: product.price },
+      user.id,
+    );
+    dbSaveCart(updated).catch(() => {});
+    setCart(updated);
+    setCartOpen(true);
   }, [user]);
 
-  // After a successful login, add the pending product automatically
+  // After a successful login, add the pending product to the local cart.
   const handleLoginSuccess = useCallback(async (loggedInUser: UserResponse) => {
     onUserChange(loggedInUser);
     setShowLogin(false);
     if (pendingProductId) {
       const id = pendingProductId;
       setPendingProductId(null);
-      setAddingId(id);
-      try {
-        const updated = await addToCart(id);
+      const product = productsRef.current.find(p => p.id === id);
+      if (product) {
+        // Load any pre-existing local cart for this user first
+        const existing = await dbLoadCart(loggedInUser.id).catch(() => null);
+        const updated = buildOptimisticCart(
+          existing,
+          { id: product.id, name: product.name, price: product.price },
+          loggedInUser.id,
+        );
+        dbSaveCart(updated).catch(() => {});
         setCart(updated);
         setCartOpen(true);
-      } finally {
-        setAddingId(null);
       }
     }
   }, [onUserChange, pendingProductId]);
 
+  // Wrapper used by CartDrawer's onUpdate — keeps IndexedDB in sync with every
+  // cart mutation (qty change, item removal).
+  const handleCartUpdate = useCallback((updated: CartSummary) => {
+    setCart(updated);
+    if (user) dbSaveCart(updated).catch(() => {});
+  }, [user]);
+
+  // Close the cart drawer and navigate to the checkout view.
+  const handleProceedToCheckout = useCallback(() => {
+    setCartOpen(false);
+    setView('checkout');
+  }, []);
+
+  // Called by CheckoutPage after the user acknowledges the success screen.
+  const handleCheckoutSuccess = useCallback((orderId: string) => {
+    setCart(null);
+    if (user) dbClearCart(user.id).catch(() => {});
+    setView('products');
+    showToast(`Order placed! Reference: ${orderId.slice(0, 8).toUpperCase()}`, 'success');
+  }, [user, showToast]);
+
   const cartItemCount = cart?.item_count ?? 0;
 
+  // IDs of products that are components of a bundle — excluded from the grid.
+  const bundleComponentIds = useMemo(() => new Set(
+    products.flatMap(p => p.is_bundle ? p.components.map(c => c.id) : [])
+  ), [products]);
+
+  const visibleProducts = useMemo(
+    () => products.filter(p => !bundleComponentIds.has(p.id)),
+    [products, bundleComponentIds],
+  );
+
+  // ── Checkout view ────────────────────────────────────────────────
+  if (view === 'checkout' && cart && user) {
+    return (
+      <>
+        <CheckoutPage
+          cart={cart}
+          user={user}
+          onBack={() => setView('products')}
+          onSuccess={handleCheckoutSuccess}
+        />
+        {/* Toasts must remain mounted so success notification fires correctly */}
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  // ── Products view ─────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-clay-blue pt-24 pb-20 relative">
       {/* Top fade */}
@@ -653,15 +670,13 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
           </div>
         )}
 
-        {/* Product grid */}
+        {/* Product grid — bundle components hidden; they appear only inside the bundle modal */}
         {!loadingProducts && products.length > 0 && (
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {products.map(product => (
+            {visibleProducts.map(product => (
               <ProductCard
                 key={product.id}
                 product={product}
-                addingId={addingId}
-                cartError={cartError}
                 onAddToCart={handleAddToCart}
                 onOpenBundle={setSelectedBundle}
               />
@@ -688,9 +703,8 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
         <CartDrawer
           cart={cart}
           onClose={() => setCartOpen(false)}
-          onUpdate={setCart}
-          onToast={showToast}
-          onOrderComplete={() => { setCart(null); }}
+          onUpdate={handleCartUpdate}
+          onProceedToCheckout={handleProceedToCheckout}
         />
       )}
 
@@ -698,8 +712,6 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
       {selectedBundle && (
         <BundleModal
           product={selectedBundle}
-          addingId={addingId}
-          cartError={cartError}
           onAddToCart={id => { handleAddToCart(id); setSelectedBundle(null); }}
           onClose={() => setSelectedBundle(null)}
         />
