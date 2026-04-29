@@ -85,8 +85,8 @@ export function orderStatusStyle(order: Order): StatusStyle {
 // API                                                                 //
 // ------------------------------------------------------------------ //
 
-export async function fetchOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_URL}/orders`, { credentials: 'include' });
+export async function fetchOrders(signal?: AbortSignal): Promise<Order[]> {
+  const res = await fetch(`${API_URL}/orders`, { credentials: 'include', signal });
   if (res.status === 401) throw new Error('not_authenticated');
   if (!res.ok) throw new Error('fetch_orders_failed');
   return res.json();

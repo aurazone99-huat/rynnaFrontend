@@ -131,7 +131,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onProc
             cart.items.map(item => (
               <div key={item.product_id} className="clay-puffy-sm p-4 flex gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-black text-zinc-800 truncate">{item.product_name}</p>
+                  <p className="text-sm font-black text-zinc-800 break-words">{item.product_name}</p>
                   <p className="text-xs text-zinc-400 font-medium mt-0.5">{formatPrice(item.unit_price)} each</p>
                 </div>
 
@@ -552,7 +552,6 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
     );
     dbSaveCart(updated).catch(() => {});
     setCart(updated);
-    setCartOpen(true);
   }, [user]);
 
   // After a successful login, add the pending product to the local cart.
@@ -573,7 +572,6 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
         );
         dbSaveCart(updated).catch(() => {});
         setCart(updated);
-        setCartOpen(true);
       }
     }
   }, [onUserChange, pendingProductId]);

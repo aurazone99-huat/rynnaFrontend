@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { formatPrice } from '../services/products';
 import {
   canPay,
@@ -7,6 +7,10 @@ import {
   orderStatusLabel,
   orderStatusStyle,
 } from '../services/orders';
+
+// Module-level cache: persists across tab switches so re-mounting the
+// Orders tab shows data instantly while a background refresh runs.
+let _cachedOrders: Order[] | null = null;
 import {
   fetchActivePaymentMethods,
   PaymentMethod,
@@ -127,8 +131,10 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, loadingPayment, onPay }) =
 // ------------------------------------------------------------------ //
 
 const OrdersSection: React.FC<Props> = ({ user: _user }) => {
-  const [orders, setOrders]                   = useState<Order[]>([]);
-  const [loading, setLoading]                 = useState(true);
+  const [orders, setOrders]                   = useState<Order[]>(_cachedOrders ?? []);
+  // Only show the full-screen spinner when we have no cached data.
+  const [loading, setLoading]                 = useState(_cachedOrders === null);
+  const [refreshing, setRefreshing]           = useState(false);
   const [error, setError]                     = useState<string | null>(null);
 
   // Payment flow
@@ -141,16 +147,38 @@ const OrdersSection: React.FC<Props> = ({ user: _user }) => {
   // Success banner after proof upload
   const [banner, setBanner]                   = useState<string | null>(null);
 
+  // Track the in-flight request so we can abort it on unmount / re-fire.
+  const abortRef = useRef<AbortController | null>(null);
+
   const loadOrders = useCallback(() => {
-    setLoading(true);
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    if (_cachedOrders === null) setLoading(true);
+    else setRefreshing(true);
     setError(null);
-    fetchOrders()
-      .then(setOrders)
-      .catch(() => setError('Failed to load orders. Please try again.'))
-      .finally(() => setLoading(false));
+
+    fetchOrders(ctrl.signal)
+      .then(data => {
+        _cachedOrders = data;
+        setOrders(data);
+      })
+      .catch(err => {
+        if (err?.name === 'AbortError') return; // superseded by a newer call
+        setError('Failed to load orders. Please try again.');
+      })
+      .finally(() => {
+        if (ctrl.signal.aborted) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, []);
 
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  useEffect(() => {
+    loadOrders();
+    return () => abortRef.current?.abort();
+  }, [loadOrders]);
 
   const handlePay = async (order: Order) => {
     setLoadingPaymentFor(order.id);
@@ -264,6 +292,16 @@ const OrdersSection: React.FC<Props> = ({ user: _user }) => {
               <line x1="9" y1="16" x2="12" y2="16"/>
             </svg>
             <p className="text-base font-black tracking-tight text-emerald-400">No orders yet</p>
+          </div>
+        )}
+
+        {/* Background refresh indicator */}
+        {!loading && refreshing && (
+          <div className="flex justify-center mb-4">
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/60 text-[10px] font-black text-emerald-500 uppercase tracking-widest">
+              <span className="w-2 h-2 border-2 border-emerald-200 border-t-emerald-500 rounded-full animate-spin" />
+              Checking for updates…
+            </span>
           </div>
         )}
 
