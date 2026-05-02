@@ -5,9 +5,9 @@ import { UserResponse } from '../services/auth';
 type TabType = 'home' | 'preorder' | 'orders';
 
 interface HeaderProps {
-  activeTab: TabType;
-  onTabChange: (tab: TabType) => void;
-  user: UserResponse | null;
+  activeTab:    TabType;
+  onTabChange:  (tab: TabType) => void;
+  user:         UserResponse | null;
   onUserChange: (user: UserResponse | null) => void;
 }
 

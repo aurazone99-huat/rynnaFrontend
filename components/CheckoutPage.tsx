@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   CartSummary,
   checkout,
   formatPrice,
   OrderResponse,
-  syncCartToBackend,
 } from '../services/products';
 import {
   fetchActivePaymentMethods,
@@ -81,20 +80,27 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
   const [placedOrder, setPlacedOrder] = useState<OrderResponse | null>(null);
   const [proofMethod, setProofMethod] = useState<PaymentMethod | null>(null);
   const [proofUploaded, setProofUploaded] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const loadMethods = () => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoadingMethods(true);
     setMethodsError(null);
-    fetchActivePaymentMethods()
+    fetchActivePaymentMethods(ctrl.signal)
       .then(methods => {
         setPaymentMethods(methods);
         if (methods.length > 0) setSelectedMethodId(methods[0].id);
       })
-      .catch(() => setMethodsError('Failed to load payment methods. Please try again.'))
-      .finally(() => setLoadingMethods(false));
+      .catch(err => { if (err?.name !== 'AbortError') setMethodsError('Failed to load payment methods. Please try again.'); })
+      .finally(() => { if (!ctrl.signal.aborted) setLoadingMethods(false); });
   };
 
-  useEffect(() => { loadMethods(); }, []);
+  useEffect(() => {
+    loadMethods();
+    return () => abortRef.current?.abort();
+  }, []);
 
   const handlePlaceOrder = async () => {
     if (!selectedMethodId) return;
@@ -104,10 +110,8 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
     setPlacing(true);
     setOrderError(null);
     try {
-      // 1. Sync local IndexedDB cart → backend
-      await syncCartToBackend(cart);
-      // 2. Place the order with the chosen payment method
       const order = await checkout({
+        items:          cart.items.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
         payment_method: method.name,
         payment_type:   'manual',
       });

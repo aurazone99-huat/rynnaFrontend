@@ -8,6 +8,7 @@ import SocialSection from './components/SocialSection';
 import Footer from './components/Footer';
 import PreorderSection from './components/PreorderSection';
 import OrdersSection from './components/OrdersSection';
+import VerifyEmailPage from './components/VerifyEmailPage';
 import { getMe, refreshSession, UserResponse } from './services/auth';
 
 type TabType = 'home' | 'preorder' | 'orders';
@@ -28,9 +29,17 @@ const AppContent: React.FC = () => {
   const [user, setUser] = useState<UserResponse | null>(null);
   const galleryCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Email verification token — present when user lands from the email link
+  const [verifyToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('token'),
+  );
+  const [showingVerify, setShowingVerify] = useState(!!verifyToken);
+
   // Restore session on mount
   useEffect(() => {
-    getMe().then(setUser);
+    const ctrl = new AbortController();
+    getMe(ctrl.signal).then(setUser).catch(() => {});
+    return () => ctrl.abort();
   }, []);
 
   // If user logs out while on an auth-gated tab, fall back to Home.
@@ -124,6 +133,10 @@ const AppContent: React.FC = () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, []);
+
+  if (showingVerify && verifyToken) {
+    return <VerifyEmailPage token={verifyToken} onSuccess={() => setShowingVerify(false)} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc] selection:bg-pink-200 select-none">

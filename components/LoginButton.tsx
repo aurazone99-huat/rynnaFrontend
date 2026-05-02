@@ -3,7 +3,7 @@ import AuthModal from './AuthModal';
 import { logout, UserResponse } from '../services/auth';
 
 interface Props {
-  user: UserResponse | null;
+  user:         UserResponse | null;
   onUserChange: (user: UserResponse | null) => void;
 }
 

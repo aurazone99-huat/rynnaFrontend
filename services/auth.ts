@@ -142,8 +142,18 @@ export async function logout(): Promise<void> {
 
 // Returns the current user from the active session cookie, or null if
 // not authenticated / session expired.
-export async function getMe(): Promise<UserResponse | null> {
-  const res = await fetch(`${API_URL}/auth/me`, { credentials: 'include' });
+export async function getMe(signal?: AbortSignal): Promise<UserResponse | null> {
+  const res = await fetch(`${API_URL}/auth/me`, { credentials: 'include', signal });
   if (!res.ok) return null;
   return res.json();
+}
+
+export async function verifyEmail(token: string): Promise<void> {
+  const res = await fetch(`${API_URL}/auth/verify-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (res.status === 400) throw new Error('invalid_token');
+  if (!res.ok) throw new Error('verify_failed');
 }

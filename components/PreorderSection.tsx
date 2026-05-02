@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import {
   CartSummary,
-  clearBackendCart,
   fetchProducts,
   formatPrice,
   isComponentAvailable,
@@ -83,8 +82,6 @@ const CartDrawer: React.FC<CartDrawerProps> = ({ cart, onClose, onUpdate, onProc
         ? removeLocalCartItem(cart, productId)
         : updateLocalCartItem(cart, productId, qty);
     onUpdate(updated);
-    // If the cart just became empty, clean up any stale backend cart.
-    if (updated.item_count === 0) clearBackendCart().catch(() => {});
   };
 
   return createPortal(
@@ -308,7 +305,7 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, onAddToCart, onClose
                           <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${cAvail ? 'bg-emerald-400' : 'bg-zinc-300'}`} />
                         </div>
 
-                        {/* Name + description */}
+                        {/* Name + description + price */}
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-black leading-tight ${!cAvail ? 'line-through text-zinc-400' : 'text-zinc-800'}`}>
                             {c.name}
@@ -316,6 +313,7 @@ const BundleModal: React.FC<BundleModalProps> = ({ product, onAddToCart, onClose
                           {c.description && (
                             <p className="text-[10px] text-zinc-400 mt-0.5 truncate">{c.description}</p>
                           )}
+                          <p className="text-xs font-black text-purple-700 mt-1">{formatPrice(c.price)}</p>
                         </div>
 
                         {/* Right side: Add button (available) or Sold Out badge */}
@@ -515,10 +513,12 @@ const PreorderSection: React.FC<Props> = ({ user, onUserChange }) => {
 
   // Load products (public — no auth needed)
   useEffect(() => {
-    fetchProducts()
+    const ctrl = new AbortController();
+    fetchProducts(ctrl.signal)
       .then(setProducts)
-      .catch(() => setError('Failed to load products. Please try again.'))
-      .finally(() => setLoadingProducts(false));
+      .catch(err => { if (err?.name !== 'AbortError') setError('Failed to load products. Please try again.'); })
+      .finally(() => { if (!ctrl.signal.aborted) setLoadingProducts(false); });
+    return () => ctrl.abort();
   }, []);
 
   // Load cart from IndexedDB whenever the user changes.

@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import { login, register, googleSignIn, UserResponse } from '../services/auth';
 
-type View = 'login' | 'register';
+type View = 'login' | 'register' | 'verify_pending';
 
 interface Props {
-  onClose: () => void;
+  onClose:   () => void;
   onSuccess: (user: UserResponse) => void;
 }
 
@@ -28,6 +28,7 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const firstInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,6 +44,7 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
 
   const switchView = (v: View) => {
     setError(null);
+    setConfirmPassword('');
     setView(v);
   };
 
@@ -66,6 +68,10 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (regPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -76,8 +82,7 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
         firstName.trim() || null,
         lastName.trim() || null,
       );
-      const user = await login(email, regPassword);
-      onSuccess(user);
+      setView('verify_pending');
     } catch (err: unknown) {
       setError(
         err instanceof Error && err.message === 'conflict'
@@ -245,6 +250,15 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
               autoComplete="new-password"
               className={inputClass}
             />
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              required
+              autoComplete="new-password"
+              className={`${inputClass} ${confirmPassword && confirmPassword !== regPassword ? 'ring-2 ring-red-300' : ''}`}
+            />
 
             <button
               type="submit"
@@ -267,14 +281,41 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
           </form>
         )}
 
-        {/* Divider */}
+        {/* ── VERIFY PENDING ── */}
+        {view === 'verify_pending' && (
+          <div className="text-center space-y-5 py-2">
+            <div className="flex justify-center">
+              <div className="w-14 h-14 rounded-full bg-purple-50 flex items-center justify-center">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-purple-400">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+              </div>
+            </div>
+            <div>
+              <p className="text-base font-black text-purple-900/80 tracking-tight">Check your email</p>
+              <p className="text-xs text-zinc-400 font-medium mt-2 leading-relaxed">
+                We sent a verification link to your email address.<br/>Click it to activate your account.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => switchView('login')}
+              className="clay-button w-full py-3 text-xs font-black uppercase tracking-widest text-purple-600 bg-purple-50 outline-none"
+            >
+              Back to Sign In
+            </button>
+          </div>
+        )}
+
+        {/* Divider + Google — hidden on verify_pending */}
+        {view !== 'verify_pending' && (<>
         <div className="flex items-center gap-3 my-6">
           <div className="flex-1 h-px bg-zinc-200" />
           <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">or</span>
           <div className="flex-1 h-px bg-zinc-200" />
         </div>
 
-        {/* Google login */}
         <button
           onClick={() => !loading && googleLogin()}
           disabled={loading}
@@ -288,6 +329,7 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
           </svg>
           <span className="text-xs font-black text-zinc-600 uppercase tracking-widest">Continue with Google</span>
         </button>
+        </>)}
         </div>
       </div>
     </>,

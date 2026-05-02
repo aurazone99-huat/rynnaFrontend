@@ -25,7 +25,7 @@ const SocialSection: React.FC = () => {
     },
     {
       name: 'X (Twitter)',
-      color: 'hover:text-white',
+      color: 'hover:text-[#000000]',
       url: 'https://x.com/Rynna0809',
       svg: (
         <svg fill="currentColor" viewBox="0 0 24 24" className="w-12 h-12">

@@ -40,10 +40,10 @@ export function paymentTypeLabel(type: PaymentMethodType): string {
 // API                                                                 //
 // ------------------------------------------------------------------ //
 
-export async function fetchActivePaymentMethods(): Promise<PaymentMethod[]> {
+export async function fetchActivePaymentMethods(signal?: AbortSignal): Promise<PaymentMethod[]> {
   const res = await fetch(
     `${API_URL}/payment-methods/active?admin_id=${ADMIN_ID}`,
-    { credentials: 'include' },
+    { credentials: 'include', signal },
   );
   if (!res.ok) throw new Error('fetch_payment_methods_failed');
   return res.json();
