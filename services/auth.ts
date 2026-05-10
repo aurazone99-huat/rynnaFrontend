@@ -20,11 +20,7 @@ export interface UserResponse {
 // Internal helpers                                                     //
 // ------------------------------------------------------------------ //
 
-function sanitizeUsername(email: string): string {
-  return email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase().slice(0, 46);
-}
-
-// Throws 'invalid_credentials' on 401, 'login_failed' on other errors.
+// Throws 'invalid_credentials' on 401, 'unverified' on 403, 'login_failed' on other errors.
 async function backendLogin(identifier: string, password: string): Promise<UserResponse> {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
@@ -33,37 +29,13 @@ async function backendLogin(identifier: string, password: string): Promise<UserR
     body: JSON.stringify({ identifier, password, admin_id: ADMIN_ID }),
   });
   if (res.status === 401) throw new Error('invalid_credentials');
+  if (res.status === 403) {
+    const body = await res.json().catch(() => ({}));
+    const detail: string = body.detail ?? '';
+    if (detail.toLowerCase().includes('verify')) throw new Error('unverified');
+  }
   if (!res.ok) throw new Error('login_failed');
   return res.json();
-}
-
-// Retries with suffixed usernames on 409 username conflicts.
-async function createBackendUser(
-  email: string,
-  googleSub: string,
-  firstName: string | null,
-  lastName: string | null,
-): Promise<void> {
-  const base = sanitizeUsername(email);
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const username = attempt === 0 ? base : `${base}_${Math.floor(1000 + Math.random() * 9000)}`;
-    const res = await fetch(`${API_URL}/users`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        username,
-        email,
-        password: googleSub,
-        admin_id: ADMIN_ID,
-        first_name: firstName,
-        last_name: lastName,
-      }),
-    });
-    if (res.ok) return;
-    if (res.status !== 409) throw new Error('create_user_failed');
-  }
-  throw new Error('create_user_failed');
 }
 
 // ------------------------------------------------------------------ //
@@ -98,32 +70,15 @@ export async function register(
   if (!res.ok) throw new Error('register_failed');
 }
 
-// Google OAuth: fetch profile → try login → create if new → login.
-// Uses Google sub (stable user ID) as the backend password so the
-// same account is always resolved without storing any Google token.
 export async function googleSignIn(accessToken: string): Promise<UserResponse> {
-  const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  const res = await fetch(`${API_URL}/auth/google`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ access_token: accessToken, admin_id: ADMIN_ID ?? null }),
   });
-  if (!profileRes.ok) throw new Error('google_profile_failed');
-
-  const { email, sub, given_name, family_name } = await profileRes.json() as {
-    email: string;
-    sub: string;
-    given_name?: string;
-    family_name?: string;
-  };
-
-  try {
-    return await backendLogin(email, sub);
-  } catch (err) {
-    // Only proceed to account creation on 401 (user not found).
-    // Any other error (network, server 5xx) should propagate.
-    if (!(err instanceof Error) || err.message !== 'invalid_credentials') throw err;
-  }
-
-  await createBackendUser(email, sub, given_name ?? null, family_name ?? null);
-  return backendLogin(email, sub);
+  if (!res.ok) throw new Error('google_signin_failed');
+  return res.json();
 }
 
 // Extends the session by 30 minutes. Call this on page navigation

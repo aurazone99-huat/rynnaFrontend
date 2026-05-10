@@ -59,6 +59,8 @@ const AuthModal: React.FC<Props> = ({ onClose, onSuccess }) => {
       setError(
         err instanceof Error && err.message === 'invalid_credentials'
           ? 'Incorrect email/username or password.'
+          : err instanceof Error && err.message === 'unverified'
+          ? 'Please verify your email address before logging in.'
           : 'Something went wrong. Please try again.',
       );
     } finally {
