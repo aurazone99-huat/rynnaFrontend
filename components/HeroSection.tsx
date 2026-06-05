@@ -113,9 +113,14 @@ const HeroSection: React.FC = () => {
     
     ctx.globalCompositeOperation = 'source-over';
     ctx.save();
-    ctx.filter = 'grayscale(60%) brightness(25%) contrast(110%) saturate(50%)';
+    ctx.filter = 'grayscale(20%) brightness(55%) contrast(95%) saturate(60%) sepia(40%)';
     ctx.drawImage(mutedImg, 0, 0, canvas.width, canvas.height);
     ctx.restore();
+
+    // Pinkish colour wash — shallow overlay
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgba(255, 228, 230, 0.60)'; // #ffe4e6 — clay-pink
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.globalCompositeOperation = 'destination-out';
     trailRef.current.forEach(point => {

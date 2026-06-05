@@ -4,6 +4,7 @@ import {
   checkout,
   formatPrice,
   OrderResponse,
+  PickupMethod,
 } from '../services/products';
 import {
   fetchActivePaymentMethods,
@@ -75,6 +76,11 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
   const [placing, setPlacing]                   = useState(false);
   const [orderError, setOrderError]             = useState<string | null>(null);
 
+  // Pickup / delivery fields
+  const [pickupMethod, setPickupMethod] = useState<PickupMethod>('shipping');
+  const [address, setAddress]           = useState('');
+  const [remark, setRemark]             = useState('');
+
   // Step flow: form → (payment if proof needed) → success
   const [step, setStep]               = useState<Step>('form');
   const [placedOrder, setPlacedOrder] = useState<OrderResponse | null>(null);
@@ -106,6 +112,7 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
     if (!selectedMethodId) return;
     const method = paymentMethods.find(m => m.id === selectedMethodId);
     if (!method) return;
+    if (!address.trim()) { setOrderError('Please fill in the ' + (pickupMethod === 'shipping' ? 'delivery address' : 'event name') + '.'); return; }
 
     setPlacing(true);
     setOrderError(null);
@@ -114,6 +121,9 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
         items:          cart.items.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
         payment_method: method.name,
         payment_type:   'manual',
+        pickup_method:  pickupMethod,
+        address:        address.trim(),
+        remark:         remark.trim() || null,
       });
       setPlacedOrder(order);
       // 3. Route to payment-proof step or straight to success
@@ -168,9 +178,31 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
             {proofUploaded ? 'Payment Made!' : 'Order Placed!'}
           </h2>
           <p className="text-xs text-zinc-400 font-medium mb-1">Reference number</p>
-          <p className="font-mono text-sm font-black text-purple-700 mb-8 tracking-widest">
+          <p className="font-mono text-sm font-black text-purple-700 mb-6 tracking-widest">
             {placedOrder.id.slice(0, 8).toUpperCase()}
           </p>
+
+          {/* Pickup / delivery detail */}
+          <div className="clay-inset p-4 text-left space-y-3 mb-8">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest w-20 shrink-0">Method</span>
+              <span className="text-xs font-black text-zinc-700 capitalize">
+                {placedOrder.pickup_method === 'shipping' ? '🚚 Shipping' : '🎪 Event'}
+              </span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest w-20 shrink-0 pt-0.5">
+                {placedOrder.pickup_method === 'shipping' ? 'Address' : 'Event'}
+              </span>
+              <span className="text-xs font-semibold text-zinc-700 leading-relaxed">{placedOrder.address}</span>
+            </div>
+            {placedOrder.remark && (
+              <div className="flex items-start gap-2">
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest w-20 shrink-0 pt-0.5">Notes</span>
+                <span className="text-xs text-zinc-500 leading-relaxed">{placedOrder.remark}</span>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => onSuccess(placedOrder.id)}
@@ -232,6 +264,60 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({ cart, user: _user, onBack, 
             <div className="border-t border-zinc-100 pt-4 flex items-center justify-between">
               <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Total</span>
               <span className="text-2xl font-black text-purple-900">{formatPrice(cart.total)}</span>
+            </div>
+          </div>
+
+          {/* ── Pickup / Delivery ────────────────────────────────── */}
+          <div className="clay-puffy bg-white p-6 space-y-5">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">
+              Pickup / Delivery
+            </p>
+
+            {/* Shipping vs Event toggle */}
+            <div className="flex gap-3">
+              {(['shipping', 'event'] as PickupMethod[]).map(opt => {
+                const selected = pickupMethod === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => { setPickupMethod(opt); setAddress(''); }}
+                    className={`flex-1 clay-inset py-3 text-xs font-black uppercase tracking-widest outline-none transition-all rounded-2xl ${
+                      selected ? 'ring-2 ring-purple-400 bg-purple-50/40 text-purple-700' : 'text-zinc-400 hover:bg-zinc-50/60'
+                    }`}
+                  >
+                    {opt === 'shipping' ? '🚚 Shipping' : '🎪 Event'}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Address / Event name */}
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                {pickupMethod === 'shipping' ? 'Delivery Address' : 'Event Name'}
+              </label>
+              <textarea
+                rows={3}
+                placeholder={pickupMethod === 'shipping' ? 'Enter your full delivery address…' : 'Enter the event name…'}
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                className="w-full clay-inset px-4 py-3 text-sm text-zinc-700 bg-transparent outline-none placeholder:text-zinc-400 font-medium resize-none"
+              />
+            </div>
+
+            {/* Remark */}
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                Notes to Seller <span className="normal-case font-medium text-zinc-300">(optional)</span>
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Any special requests or notes…"
+                value={remark}
+                onChange={e => setRemark(e.target.value)}
+                className="w-full clay-inset px-4 py-3 text-sm text-zinc-700 bg-transparent outline-none placeholder:text-zinc-400 font-medium resize-none"
+              />
             </div>
           </div>
 

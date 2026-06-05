@@ -16,7 +16,7 @@ const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, user, onUserCha
 
   const tabs: { id: TabType; label: string; authRequired?: boolean }[] = [
     { id: 'home',     label: 'Home' },
-    { id: 'preorder', label: 'Preorder' },
+    { id: 'preorder', label: 'Merchandise' },
     { id: 'orders',   label: 'Orders', authRequired: true },
   ];
 
@@ -56,8 +56,21 @@ const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, user, onUserCha
           </nav>
         </div>
 
-        {/* Right: Login */}
-        <LoginButton user={user} onUserChange={onUserChange} />
+        {/* Right: Digital + Login */}
+        <div className="flex items-center gap-2">
+          <a
+            href="https://ganknow.com/rynna0809?tab=shop"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="clay-button px-6 py-2.5 bg-white outline-none flex items-center gap-2"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-purple-400">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            </svg>
+            <span className="text-xs font-black text-purple-600 uppercase tracking-widest">Digital</span>
+          </a>
+          <LoginButton user={user} onUserChange={onUserChange} />
+        </div>
       </div>
     </header>
   );

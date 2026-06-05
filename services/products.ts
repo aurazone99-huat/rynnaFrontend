@@ -93,19 +93,27 @@ export interface CheckoutItem {
   quantity:   number;
 }
 
+export type PickupMethod = 'shipping' | 'event';
+
 export interface CheckoutRequest {
   items:                  CheckoutItem[];
   payment_method:         string;
   payment_type?:          'manual' | 'payment_gateway';
   external_reference_id?: string | null;
+  pickup_method:          PickupMethod;
+  address:                string;
+  remark?:                string | null;
 }
 
 export interface OrderResponse {
-  id:          string;
-  user_id:     string;
-  total_price: string;
-  status:      string;
-  created_at:  string;
+  id:             string;
+  user_id:        string;
+  total_price:    string;
+  status:         string;
+  created_at:     string;
+  pickup_method:  PickupMethod | null;
+  address:        string | null;
+  remark:         string | null;
 }
 
 /** Returns the created OrderResponse, or throws with a `status` property on 409. */
