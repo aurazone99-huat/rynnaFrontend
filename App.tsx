@@ -26,6 +26,11 @@ interface DustParticle {
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('home');
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const [user, setUser] = useState<UserResponse | null>(null);
   const galleryCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -44,7 +49,7 @@ const AppContent: React.FC = () => {
 
   // If user logs out while on an auth-gated tab, fall back to Home.
   useEffect(() => {
-    if (!user && activeTab === 'orders') setActiveTab('home');
+    if (!user && activeTab === 'orders') handleTabChange('home');
   }, [user, activeTab]);
 
   // Refresh the session cookie every 20 minutes while the tab is open,
@@ -140,7 +145,7 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc] selection:bg-pink-200 select-none">
-      <Header activeTab={activeTab} onTabChange={setActiveTab} user={user} onUserChange={setUser} />
+      <Header activeTab={activeTab} onTabChange={handleTabChange} user={user} onUserChange={setUser} />
       <main className="flex-grow">
         {activeTab === 'preorder' && (
           <PreorderSection user={user} onUserChange={setUser} />
